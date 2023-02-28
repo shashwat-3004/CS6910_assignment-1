@@ -186,18 +186,18 @@ def weight_bias_initialize(neurons_per_layer,init='Xavier'):
   for i in range(1,len(neurons_per_layer)):
     if init=='Xavier':
       parameters['W_'+str(i)]=np.random.randn(neurons_per_layer[i],neurons_per_layer[i-1])*np.sqrt(2/(neurons_per_layer[i-1]+neurons_per_layer[i]))
-    
-    if init=='random':
-          ### Question: what does random mean here? random normal/uniform etc 
-      pass
+              
+    if init=='random': # Random normal
+      parameters['W_'+str(i)]=np.random.randn(neurons_per_layer[i],neurons_per_layer[i-1])*0.01
 
+    
     
     parameters['b_'+str(i)]=np.zeros((neurons_per_layer[i],1))
   
     old_parameters['W_'+str(i)]=np.zeros((neurons_per_layer[i],neurons_per_layer[i-1]))
     old_parameters['b_'+str(i)]=np.zeros((neurons_per_layer[i],1))
 
-    look_ahead_parameters=parameters.copy()
+    look_ahead_parameters=parameters.copy()  ## For different optimizers
 
   return parameters,old_parameters,look_ahead_parameters
 
@@ -276,7 +276,7 @@ work.shape
 
 print(len(prem))
 
-def backpropagate(y_hat,y_true,activation,pre_activation,parameters,activation_function,loss,batch_size):  #Add L2 
+def backpropagate(y_hat,y_true,activation,pre_activation,parameters,activation_function,loss,batch_size,lambda_val):  #### L2 added as well  
   '''Function to calculate gradients
 
     Parameters
@@ -321,13 +321,12 @@ def backpropagate(y_hat,y_true,activation,pre_activation,parameters,activation_f
   # Last_layer
   if loss=='cross_entropy':
     gradient_dA['dA_'+str(num_layer)]=-(y_true-y_hat)
-  
+          
   elif loss=='mse':
-        ### Have to calculate
-    pass
+    gradient_dA['dA_'+str(num_layer)]=-(y_true-y_hat)*softmax_derivative(pre_activation[num_layer])
   
   for layer in range(num_layer,0,-1):  # move from Hidden layer L-1 to Hidden layer 1
-    parameter_gradient['dW_'+str(layer)]=(np.dot(gradient_dA['dA_'+str(layer)],activation[layer-1].T))/batch_size
+    parameter_gradient['dW_'+str(layer)]=(np.dot(gradient_dA['dA_'+str(layer)],activation[layer-1].T)+lamda_val*parameter['W_'+str(layer)])/batch_size
     parameter_gradient['db_'+str(layer)]=np.sum(gradient_dA['dA_'+str(layer)],axis=1,keepdims=True)/batch_size  
     ### For batch_size I found this online
     ### Reference:https://datascience.stackexchange.com/questions/20139/gradients-for-bias-terms-in-backpropagation
