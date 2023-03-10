@@ -92,7 +92,8 @@ def softmax(a):
   #----
   ## a => np.array 
   #----
-  return np.exp(a)/(np.sum(np.exp(a),axis=0))
+  return np.exp(a-np.max(a,axis=0))/(np.sum(np.exp(a-np.max(a,axis=0)),axis=0))  
+  ## To prevent overflow error, the numpy array has been subtracted from the maximum value in that numpy array
 
 def derivative_softmax(a):
   return softmax(a)*(1-softmax(a))
@@ -139,7 +140,7 @@ J:  float
     J=(-1*np.sum(np.multiply(y_true,np.log(y_hat))))/batch_size
      
   elif loss=='mse':
-    J=(1/2*(batch_size))*(np.sum((y_true-y_hat)**2))
+    J=((1/2)*(np.sum((y_true-y_hat)**2)))/batch_size
 
   # L2 Regularisation
   sum_square_weight=0
@@ -152,56 +153,75 @@ J:  float
 
   return J
 
-loss_computation()
+class NeuralNetwork():
+   def __init__(self,num_layers,activation_function,loss,batch_size,lambda_val):
+      self.num_layers=num_layers
+      self.num_hidden_layers=self.num_layers-2
+      self.activation_function=activation_function
+      self.loss=loss
+      self.batch_size=batch_size
+      self.lambda_val=lambda_val
+      
+   def weight_bias_initialize(self,neurons_per_layer,init):
+        '''Initialise weights, biases, previous updates & look ahead parameters for different gradient descent algorithms
 
-def weight_bias_initialize(neurons_per_layer,init='Xavier'):
-  '''Initialise weights, biases, previous updates & look ahead parameters for different gradient descent algorithms
+        Parameters
+        ----
+        neurons_per_layer: list
+          list of number of neurons per layer in the structure [input_features,hiddenunits ,hiddenunits,..outputclasses]
 
-    Parameters
-    ----
-    neurons_per_layer: list
-          list of number of neurons per layer in the structure [input_features,hiddenunits,hiddenunits,..outputclasses]
-
-    init: string
+        init: string
           initialisation type: default set to 'Xavier'
 
-    Returns
-    ----
-    parameters: dictionary
+        Returns
+        ----
+        parameters: dictionary
           contains weights and biases. 
 
-    old_parameters: dictionary
+        old_parameters: dictionary
           previous updates initialisation. Used in nesterov, momemtum gradient descent
 
-    look_ahead_parameters: dictionary
+        look_ahead_parameters: dictionary
           copy of parameters, later used in nesterov gradient descent
+        
+        v: dictionary
+          copy of old_parameters, later used in rmsprop, adam & nadam
+
+        m: dictionary
+          copy of old_parameters, later used in adam & nadam 
 
     '''
 
   # neurons_per_layer is a list specifying number of neurons per layer
-  parameters={}
+        self.neurons_per_layer=neurons_per_layer
+        self.init=init
+        np.random.seed(42)
 
-  old_parameters={} ## For different kinds of gradient descent
+        self.parameters={}
+        self.old_parameters={} ## For different kinds of gradient descent
 
-  for i in range(1,len(neurons_per_layer)):
-    if init=='Xavier':
-      parameters['W_'+str(i)]=np.random.randn(neurons_per_layer[i],neurons_per_layer[i-1])*np.sqrt(2/(neurons_per_layer[i-1]+neurons_per_layer[i]))
-              
-    if init=='random': # Random normal
-      parameters['W_'+str(i)]=np.random.randn(neurons_per_layer[i],neurons_per_layer[i-1])*0.01
+        for i in range(1,len(self.neurons_per_layer)):
+            if self.init=='Xavier':
+                self.sdev=np.sqrt(2/(self.neurons_per_layer[i-1]+self.neurons_per_layer[i]))
+                self.parameters['W_'+str(i)]=np.random.randn(self.neurons_per_layer[i],self.neurons_per_layer[i-1])*self.sdev
+    
+            if init=='random': # Random normal
+                self.parameters['W_'+str(i)]=np.random.randn(self.neurons_per_layer[i],self.neurons_per_layer[i-1])*0.01
 
     
-    
-    parameters['b_'+str(i)]=np.zeros((neurons_per_layer[i],1))
+            self.parameters['b_'+str(i)]=np.zeros((self.neurons_per_layer[i],1))
   
-    old_parameters['W_'+str(i)]=np.zeros((neurons_per_layer[i],neurons_per_layer[i-1]))
-    old_parameters['b_'+str(i)]=np.zeros((neurons_per_layer[i],1))
+            self.old_parameters['W_'+str(i)]=np.zeros((self.neurons_per_layer[i],self.neurons_per_layer[i-1]))
+            self.old_parameters['b_'+str(i)]=np.zeros((self.neurons_per_layer[i],1))
+  
+        # For nesterov, adam, rmsprop, nadam
+        self.look_ahead_parameters=self.parameters.copy()  
+        self.v=self.old_parameters.copy()
+        self.m=self.old_parameters.copy()           
 
-    look_ahead_parameters=parameters.copy()  ## For different optimizers
-
-  return parameters,old_parameters,look_ahead_parameters
-
-def forward_propagation(data,parameter,activation_function='sigmoid'):
+        return self.parameters,self.old_parameters,self.look_ahead_parameters,self.v,self.m
+    
+   def forward_propagation(self,data,parameters):
     '''Function to forward propagate a minibatch of data once through the NN
 
     Parameters
@@ -224,60 +244,41 @@ def forward_propagation(data,parameter,activation_function='sigmoid'):
         contains all pre-activations values
 
     '''
+    self.parameters=parameters
+    self.data=data
+    self.activation = [0]*self.num_layers # activations
+    self.pre_activation = [0]*self.num_layers # pre-activations
     
-    total_layers=len(parameter)//2+1
-    activation = [None]*total_layers # activations
-    pre_activation = [None]*total_layers # pre-activations
+    self.activation[0] = self.data # H_1=training data
     
-    activation[0] = data # H_1=training data
-    
-    for layer in range(1, total_layers):
-        Weight = parameter["W_"+str(layer)]
-        bias = parameter["b_"+str(layer)]
+    for layer in range(1, self.num_layers):   # start from hidden layer 
+        self.Weight = self.parameters["W_"+str(layer)]
+        self.bias = self.parameters["b_"+str(layer)]
         
-        pre_activation[layer] = np.matmul(Weight,activation[layer-1]) + bias    # a_i=W*h_(i-1) + b_i
+        self.pre_activation[layer] = np.matmul(self.Weight,self.activation[layer-1]) + self.bias    # a_i=W*h_(i-1) + b_i
         
-        if layer == total_layers-1:
-            activation[layer] = softmax(pre_activation[layer]) # activation function for output layer is softmax
+        if layer == self.num_layers-1:
+            self.activation[layer] = softmax(self.pre_activation[layer])
         else:
-            if activation_function == 'sigmoid':
-                activation[layer] = sigmoid(pre_activation[layer]) # h_i=g(a_i), g is the activation function
-            elif activation_function == 'relu':
-                activation[layer] = relu(pre_activation[layer])
-            elif activation_function == 'tanh':
-                activation[layer] = tanh(pre_activation[layer])
-            elif activation_function== 'identity':
-                activation[layer] = identity(pre_activation[layer])
+            if self.activation_function == 'sigmoid':
+                self.activation[layer] = sigmoid(self.pre_activation[layer]) # h_i=g(a_i), g is the activation function
+            elif self.activation_function == 'relu':
+                self.activation[layer] = relu(self.pre_activation[layer])
+            elif self.activation_function == 'tanh':
+                self.activation[layer] = tanh(self.pre_activation[layer])
+            elif self.activation_function== 'identity':
+                self.activation[layer] = identity(self.pre_activation[layer])
+
+            #####
+            # Can add other activation functions here
+            #####
                 
-    y_pred = activation[total_layers-1]  # output
+    self.y_pred = self.activation[self.num_layers-1]  # output
 
-    return y_pred,activation,pre_activation
-
-prem,old_prem,look_ahead_prem=weight_bias_initialize([784,10,20,10,10])
-
-prem['W_5']
-
-look_ahead_prem
-
-prem['b_2'].shape
-
-work=np.array([X_train[:,0],X_train[:,1]])
-work.shape
-
-
-
-output,Activation,Pre_Activation=forward_propagation(work.T,prem)
-
-output
-
-output.shape
-
-work.shape
-
-print(len(prem))
-
-def backpropagate(y_hat,y_true,activation,pre_activation,parameters,activation_function,loss,batch_size,lambda_val):  #### L2 added as well  
-  '''Function to calculate gradients
+    return self.y_pred,self.activation,self.pre_activation
+    
+   def backpropagate(self,y_hat,y_true,activation,pre_activation,parameters):  
+    '''Function to calculate gradients
 
     Parameters
     ----------
@@ -287,7 +288,7 @@ def backpropagate(y_hat,y_true,activation,pre_activation,parameters,activation_f
         actual class labels
      
     activation: np array
-        post-activations
+        after-activations
 
     pre_activation: np array
         pre-activations   
@@ -313,138 +314,87 @@ def backpropagate(y_hat,y_true,activation,pre_activation,parameters,activation_f
 
     '''
 
-  num_layer=len(parameters)//2   ## No. of layers in NN
-  gradient_dA={}      ##Store Gradients wrt to pre-activations
-  gradient_dH={}      ##Store Gradients wrt to post-activations
-  parameter_gradient={}  ##Store gradients wrt to weight and bias 
+    self.layers_no_input=self.num_layers-1   ## No. of layers in NN exluding the input
+    self.gradient_dA={}      ##Store Gradients wrt to pre-activations
+    self.gradient_dH={}      ##Store Gradients wrt to after-activations
+    self.parameter_gradient={}  ##Store gradients wrt to weight and bias
+    self.y_true=y_true
+    self.y_hat=y_hat
+    self.pre_activation=pre_activation
+    self.activation=activation
+    self.parameters=parameters
 
   # Last_layer
-  if loss=='cross_entropy':
-    gradient_dA['dA_'+str(num_layer)]=-(y_true-y_hat)
-          
-  elif loss=='mse':
-    gradient_dA['dA_'+str(num_layer)]=-(y_true-y_hat)*softmax_derivative(pre_activation[num_layer])
+    if self.loss=='cross_entropy':
+        self.gradient_dA['dA_'+str(self.layers_no_input)]=-1*(self.y_true-self.y_hat)
   
-  for layer in range(num_layer,0,-1):  # move from Hidden layer L-1 to Hidden layer 1
-    parameter_gradient['dW_'+str(layer)]=(np.dot(gradient_dA['dA_'+str(layer)],activation[layer-1].T)+lamda_val*parameter['W_'+str(layer)])/batch_size
-    parameter_gradient['db_'+str(layer)]=np.sum(gradient_dA['dA_'+str(layer)],axis=1,keepdims=True)/batch_size  
+    elif self.loss=='mse':
+      self.gradient_dA['dA_'+str(self.layers_no_input)]=-1*(self.y_true-self.y_hat)*derivative_softmax(self.pre_activation[self.layers_no_input])
+    
+  
+    for layer in range(self.layers_no_input,0,-1):  # move from Hidden layer L-1 to Hidden layer 1
+        self.parameter_gradient['dW_'+str(layer)]=(np.dot(self.gradient_dA['dA_'+str(layer)],self.activation[layer-1].T)+self.lambda_val*self.parameters['W_'+str(layer)])/self.batch_size
+        self.parameter_gradient['db_'+str(layer)]=np.sum(self.gradient_dA['dA_'+str(layer)],axis=1,keepdims=True)/self.batch_size  
     ### For batch_size I found this online
     ### Reference:https://datascience.stackexchange.com/questions/20139/gradients-for-bias-terms-in-backpropagation
     
-    if layer>1:  
-      if activation_function=='sigmoid':
-        gradient_dH['dH_'+str(layer-1)]=np.matmul(parameter_gradient['dW_'+str(layer)].T,gradient_dA['dA_'+str(layer)])
-        gradient_dA['dA_'+str(layer-1)]=gradient_dH['dH_'+str(layer-1)]*sigmoid_derivative(pre_activation[layer-1])
+        if layer>1:  
+            if self.activation_function=='sigmoid':
+                self.gradient_dH['dH_'+str(layer-1)]=np.matmul(self.parameters['W_'+str(layer)].T,self.gradient_dA['dA_'+str(layer)])
+                self.gradient_dA['dA_'+str(layer-1)]=self.gradient_dH['dH_'+str(layer-1)]*sigmoid_derivative(self.pre_activation[layer-1])
     
-      elif activation_function=='relu':
-        gradient_dH['dH_'+str(layer-1)]=np.matmul(parameter_gradient['dW_'+str(layer)].T,gradient_dA['dA_'+str(layer)])
-        gradient_dA['dA_'+str(layer-1)]=gradient_dH['dH_'+str(layer-1)]*relu_derivative(pre_activation[layer-1])  
+            elif self.activation_function=='relu':
+                self.gradient_dH['dH_'+str(layer-1)]=np.matmul(self.parameters['W_'+str(layer)].T,self.gradient_dA['dA_'+str(layer)])
+                self.gradient_dA['dA_'+str(layer-1)]=self.gradient_dH['dH_'+str(layer-1)]*relu_derivative(self.pre_activation[layer-1])  
 
-      elif activation_function=='tanh':
-        gradient_dH['dH_'+str(layer-1)]=np.matmul(parameter_gradient['dW_'+str(layer)].T,gradient_dA['dA_'+str(layer)])
-        gradient_dA['dA_'+str(layer-1)]=gradient_dH['dH_'+str(layer-1)]*tanh_derivative(pre_activation[layer-1])   
+            elif self.activation_function=='tanh':
+                self.gradient_dH['dH_'+str(layer-1)]=np.matmul(self.parameters['W_'+str(layer)].T,self.gradient_dA['dA_'+str(layer)])
+                self.gradient_dA['dA_'+str(layer-1)]=self.gradient_dH['dH_'+str(layer-1)]*tanh_derivative(self.pre_activation[layer-1])   
 
-      elif activation_function=='identity':
-        gradient_dH['dH_'+str(layer-1)]=np.matmul(parameter_gradient['dW_'+str(layer)].T,gradient_dA['dA_'+str(layer)])
-        gradient_dA['dA_'+str(layer-1)]=gradient_dH['dH_'+str(layer-1)]*identity_derivative(pre_activation[layer-1])        
+            elif self.activation_function=='identity':
+                self.gradient_dH['dH_'+str(layer-1)]=np.matmul(self.parameters['W_'+str(layer)].T,self.gradient_dA['dA_'+str(layer)])
+                self.gradient_dA['dA_'+str(layer-1)]=self.gradient_dH['dH_'+str(layer-1)]*identity_derivative(self.pre_activation[layer-1])        
 
-  return parameter_gradient
-
-pre,da=backpropagate(output,y_train_encoded[:,0:2],Activation,Pre_Activation,prem,'sigmoid','cross_entropy',2)
-
-da
-
-pre=backpropagate(output,y_train[:,0:2],Activation,Pre_Activation,prem,'sigmoid','cross_entropy',1)
-
-## Optimizers
-
-def sgd(parameters,gradients,learning_rate):
+    return self.parameter_gradient
 
 
-  num_layer=len(parameters)//2
+   def predict(self,data, parameters):
+        self.data=data
+        self.parameters=parameters
+        
+        self.output, _, _ = self.forward_propagation(self.data, self.parameters)
+        self.predictions = np.argmax(self.output, axis=0)
+        return self.predictions
+   
+   def loss_plot(self,train_loss,val_loss):
+     self.train_loss=train_loss
+     self.val_loss=val_loss
+     plt.plot(list(range(0,len(self.train_loss))), self.train_loss, 'r', label="Training loss")
+     plt.plot(list(range(0,len(self.val_loss))), self.val_loss, 'b', label="Validation loss")
+     plt.title("Loss vs Epochs", size=10)
+     plt.xlabel("Epochs", size=10)
+     plt.ylabel("Loss", size=10)
+     plt.legend()
+     plt.show()
 
-  for i in range(1,num_layer+1): ## Since dictionary has keys 'W_1' to 'W_L'
-
-    parameters['W_'+str(i)]-=learning_rate*gradients['dW_'+str(i)]
-    parameters['b_'+str(i)]-=learning_rate*gradients['db_'+str(i)]
-  
-  return parameters
-
-
-def momentum_gd(parameters,old_parameters,gradients,learning_rate,beta):
-
-  num_layers=len(parameters)//2
-
-  for i in range(1,num_layers+1):
-    old_parameters['W_'+str(i)]=beta*old_parameters['W_'+str(i)]+gradients['dW_'+str(i)]
-    parameters['W_'+str(i)]-=learning_rate*old_parameters['W_'+str(i)]
-
-    old_parameters['b_'+str(i)]=beta*old_parameters['b_'+str(i)]+gradients['db_'+str(i)]
-    parameters['b_'+str(i)]-=learning_rate*old_parameters['b_'+str(i)]
-  
-
-  return parameters,old_parameters
-
-def nesterov_gd(parameters,old_parameters,look_ahead_parameters,learning_rate,beta,train_data,train_label,activation_function,loss,batch_size):
-  
-  num_layers=len(parameters)//2
-
-  for i in range(1,num_layers+1):
-    look_ahead_parameters['W_'+str(i)]=parameters['W_'+str(i)]-beta*old_parameters['W_'+str(i)]
-    look_ahead_parameters['b_'+str(i)]=parameters['b_'+str(i)]-beta*old_parameters['b_'+str(i)]
-
-  output,H,A=forward_propagation(train_data,look_ahead_parameters,activation_function)
-  look_ahead_gradients=backpropagate(output,train_label,H,A,look_ahead_parameters,activation_function,loss,batch_size)
-  parameters,old_parameters=momentum_gd(parameters,old_parameters,look_ahead_gradients,learning_rate,beta)
-
-  return parameters,old_parameters,look_ahead_parameters
-
-
-
-
-
-def rmsprop(parameters,gradients,learning_rate,beta,v):
-
-  epsilon=1e-5
-
-  num_layers=len(parameters)//2
-  for i in range(1,num_layers+1):
-
-    v_dw=beta*v['W_'+str(i)]+(1-beta)*np.matmul(gradients['dW_'+str(i)],gradients['dW_'+str(i)])
-    v_db=beta*v['b_'+str(i)]+(1-beta)*np.matmul(gradients['db_'+str(i)],gradients['db_'+str(i)])
-
-    #store these in 'v'-dict ==> old_parameter
-
-    v['W_'+str(i)]=v_dw
-    v['b_'+str(i)]=v_db
-
-    parameters['W_'+str(i)]-=((learning_rate/np.sqrt(v_dw+epsilon))*gradients['dW_'+str(i)])
-    parameters['b_'+str(i)]-=((learning_rate/np.sqrt(v_db+epsilon))*gradients['db_'+str(i)])
-  return parameters
-
-1e-5
-
-#### Just for trial
 
 class NN_optimizers:
-  def __init__(self,parameters,gradients,learning_rate,old_parameters,look_ahead_parameters,beta,train_data,train_label,activation_function,loss,batch_size):
+  def __init__(self,parameters,gradients,learning_rate,old_parameters,look_ahead_parameters,v,m,t,num_layers):
     self.parameters=parameters
     self.learning_rate=learning_rate
     self.old_parameters=old_parameters
     self.look_ahead_parameters=look_ahead_parameters
-    self.beta=beta
-    self.train_data=train_data
-    self.train_label=train_label
-    self.activation_function=activation_function
     self.gradients=gradients
-    self.loss=loss
-    self.batch_size=batch_size
+    self.v=v
+    self.m=m
+    self.t=t
+    self.num_layers=num_layers  
 
   
   def sgd(self):
-    num_layer=len(self.parameters)//2
+    
 
-    for i in range(1,num_layer+1): ## Since dictionary has keys 'W_1' to 'W_L'
+    for i in range(1,self.num_layers): ## Since dictionary has keys 'W_1' to 'W_L'
 
       self.parameters['W_'+str(i)]=self.parameters['W_'+str(i)]-self.learning_rate*self.gradients['dW_'+str(i)]
       self.parameters['b_'+str(i)]=self.parameters['b_'+str(i)]-self.learning_rate*self.gradients['db_'+str(i)]
@@ -452,9 +402,9 @@ class NN_optimizers:
     return self.parameters
   
   def momentum_gd(self):
-    num_layers=len(self.parameters)//2
+    self.beta=0.9
 
-    for i in range(1,num_layers+1):
+    for i in range(1,self.num_layers):
       self.old_parameters['W_'+str(i)]=self.beta*self.old_parameters['W_'+str(i)]+self.gradients['dW_'+str(i)]
       self.parameters['W_'+str(i)]-=self.learning_rate*self.old_parameters['W_'+str(i)]
 
@@ -466,115 +416,197 @@ class NN_optimizers:
 
   
    
-  def nesterov_gd(self):
-  
-    num_layers=len(self.parameters)//2
+  def nesterov_gd(self,train_data,train_label,activation_function,loss,batch_size,lambda_val):
+    self.train_data=train_data
+    self.train_label=train_label
+    self.activation_function=activation_function
+    self.loss=loss
+    self.batch_size=batch_size
+    self.lambda_val=lambda_val
+    self.beta=0.9
+    
 
-    for i in range(1,num_layers+1):
+    for i in range(1,self.num_layers):
       self.look_ahead_parameters['W_'+str(i)]=self.parameters['W_'+str(i)]-self.beta*self.old_parameters['W_'+str(i)]
       self.look_ahead_parameters['b_'+str(i)]=self.parameters['b_'+str(i)]-self.beta*self.old_parameters['b_'+str(i)]
+        
+    nn=NeuralNetwork(self.num_layers,activation_function,loss,batch_size,lambda_val)
+    output,H,A=nn.forward_propagation(self.train_data,self.look_ahead_parameters)
+    self.look_ahead_gradients=nn.backpropagate(output,self.train_label,H,A,self.look_ahead_parameters)
 
-    output,H,A=forward_propagation(self.train_data,self.look_ahead_parameters,self.activation_function)
-    self.look_ahead_gradients=backpropagate(output,self.train_label,H,A,self.look_ahead_parameters,self.activation_function,self.loss,self.batch_size)
-    self.parameters,self.old_parameters=self.momentum_gd()
+    for i in range(1,self.num_layers):
+      self.old_parameters['W_'+str(i)]=self.beta*self.old_parameters['W_'+str(i)]+self.look_ahead_gradients['dW_'+str(i)]
+      self.parameters['W_'+str(i)]-=self.learning_rate*self.old_parameters['W_'+str(i)]
+
+      self.old_parameters['b_'+str(i)]=self.beta*self.old_parameters['b_'+str(i)]+self.look_ahead_gradients['db_'+str(i)]
+      self.parameters['b_'+str(i)]-=self.learning_rate*self.old_parameters['b_'+str(i)]
 
     return self.parameters,self.old_parameters,self.look_ahead_parameters
-
-##Some testing
-
-optim=NN_optimizers(prem,pre,0.01,old_prem,look_ahead_prem,0.8,work.T,y_train_encoded[:,0:2],'sigmoid','cross_entropy',2)
-
-optim.sgd()
-
-class_check
-
-che=sgd(prem,pre,0.01)
-
-class_check['b_2']
-
-def predict(X_test, parameters, activation_function):
-    output, _, _ = forward_propagation(X_test, parameters, activation_function)
-    predictions = np.argmax(output, axis=0)
-    return predictions
-
-def evaluate(X_train, y_train, X_test, y_test, parameters, activation_function):
-    training_predictions = predict(X_train, parameters, activation_function)
-    test_predictions = predict(X_test, parameters, activation_function)
+   
     
-    train_accuracy=accuracy_score(y_train,training_predictions)*100
-    test_accuracy=accuracy_score(y_test,test_predictions)*100
+  def rmsprop(self):
+    self.beta=0.9
+    self.epsilon=1e-7
 
-    print(f"Training accuracy = {train_accuracy} %")
-    print(f"Test accuracy = {test_accuracy} %")
+    for i in range(1,self.num_layers):
 
-    return training_predictions, test_predictions
+      v_dw=self.beta*self.v['W_'+str(i)]+(1-self.beta)*np.power(self.gradients['dW_'+str(i)],2)
+      v_db=self.beta*self.v['b_'+str(i)]+(1-self.beta)*np.power(self.gradients['db_'+str(i)],2)
+
+
+      self.v['W_'+str(i)]=v_dw
+      self.v['b_'+str(i)]=v_db
+
+      self.parameters['W_'+str(i)]-=((self.learning_rate/np.sqrt(v_dw+self.epsilon))*self.gradients['dW_'+str(i)])
+      self.parameters['b_'+str(i)]-=((self.learning_rate/np.sqrt(v_db+self.epsilon))*self.gradients['db_'+str(i)])
+    return self.parameters, self.v
+    
+    
+  def adam(self):
+
+    self.beta1 = 0.9
+    self.beta2 = 0.999
+    self.epsilon = 1e-8
+
+    for layers in range(1, self.num_layers):
+        m_dw = self.beta1*self.m["W_"+str(layers)] + (1-self.beta1)*self.gradients["dW_"+str(layers)]
+        v_dw = self.beta2*self.v["W_"+str(layers)] + (1-self.beta2)*np.power(self.gradients["dW_"+str(layers)],2)
+        mw_hat = m_dw/(1.0 - self.beta1**self.t)
+        vw_hat = v_dw/(1.0 - self.beta2**self.t)
+        self.parameters["W_"+str(layers)] -= (self.learning_rate * mw_hat)/(np.sqrt(vw_hat + self.epsilon))
+
+        m_db = self.beta1*self.m["b_"+str(layers)] + (1-self.beta1)*self.gradients["db_"+str(layers)]
+        v_db = self.beta2*self.v["b_"+str(layers)] + (1-self.beta2)*np.power(self.gradients["db_"+str(layers)],2)
+        mb_hat = m_db/(1.0 - self.beta1**self.t)
+        vb_hat = v_db/(1.0 - self.beta2**self.t)
+
+        self.parameters["b_"+str(layers)] -= (self.learning_rate * mb_hat)/(np.sqrt(vb_hat + self.epsilon))
+
+        self.v["W_"+str(layers)] = v_dw
+        self.m["W_"+str(layers)] = m_dw
+        self.v["b_"+str(layers)] = v_db
+        self.m["b_"+str(layers)] = m_db
+
+    self.t = self.t + 1  # timestep
+    return self.parameters, self.v, self.m, self.t
+
+  
+  def nadam(self,train_data,train_label,activation_function,loss,batch_size,lambda_val):
+    self.train_data=train_data
+    self.train_label=train_label
+    self.activation_function=activation_function
+    self.loss=loss
+    self.batch_size=batch_size
+    self.lambda_val=lambda_val
+    self.beta=0.9
+    self.beta1 = 0.9
+    self.beta2 = 0.999
+    self.epsilon = 1e-8
+
+
+    for layers in range(1, self.num_layers):
+      self.look_ahead_parameters["W_"+str(layers)] = self.parameters["W_"+str(layers)] - self.beta*self.old_parameters["W_"+str(layers)]
+      self.look_ahead_parameters["b_"+str(layers)] = self.parameters["b_"+str(layers)] - self.beta*self.old_parameters["b_"+str(layers)]
+    nn=NeuralNetwork(self.num_layers,activation_function,loss,batch_size,lambda_val)
+    output,H,A=nn.forward_propagation(self.train_data,self.look_ahead_parameters)
+    self.look_ahead_gradients=nn.backpropagate(output,self.train_label,H,A,self.look_ahead_parameters)
+    
+    for layers in range(1, self.num_layers):
+      m_dw = self.beta1*self.m["W_"+str(layers)] + (1-self.beta1)*self.look_ahead_gradients["dW_"+str(layers)]
+      v_dw = self.beta2*self.v["W_"+str(layers)] + (1-self.beta2)*np.power(self.look_ahead_gradients["dW_"+str(layers)],2)
+      mw_hat = m_dw/(1.0 - self.beta1**self.t)
+      vw_hat = v_dw/(1.0 - self.beta2**self.t)
+      self.parameters["W_"+str(layers)] -= (self.learning_rate * mw_hat)/(np.sqrt(vw_hat) + self.epsilon)
+
+      m_db = self.beta1*self.m["b_"+str(layers)] + (1-self.beta1)*self.look_ahead_gradients["db_"+str(layers)]
+      v_db = self.beta2*self.v["b_"+str(layers)] + (1-self.beta2)*np.power(self.look_ahead_gradients["db_"+str(layers)],2)
+      mb_hat = m_db/(1.0 - self.beta1**self.t)
+      vb_hat = v_db/(1.0 - self.beta2**self.t)
+
+      self.parameters["b_"+str(layers)] -= (self.learning_rate * mb_hat)/(np.sqrt(vb_hat) + self.epsilon)
+
+      self.v["W_"+str(layers)] = v_dw
+      self.m["W_"+str(layers)] = m_dw
+      self.v["b_"+str(layers)] = v_db
+      self.m["b_"+str(layers)] = m_db
+
+    self.t = self.t + 1  # timestep
+
+
+    return self.parameters, self.v, self.m, self.t
+
+
 
 #### Fit Neural Network for wanb sweep
 
-def neural_fit():
+def NN_fit(train_data,train_labels,val_data,val_labels):
+    
+        train_data=train_data
+        train_labels=train_labels
+        val_data=val_data
+        val_labels=val_labels
+        num_neurons=64
+        NN=NeuralNetwork(num_layers=5,activation_function='identity',loss="cross_entropy",batch_size=64,lambda_val=0)
+
+        neurons_per_layer = [num_features] + [32]*NN.num_hidden_layers + [num_classes]
+        parameters, old_parameters,look_ahead_parameters,v,m = NN.weight_bias_initialize(neurons_per_layer,init="Xavier") # initialize the parameters and past updates matrices
+        
+        optimizer='rmsprop'
 
   
-  batch_size=16
-  nn_total_layers = [num_features] + [128]*5 + [num_classes]
-  parameters, old_parameters,look_ahead_parameters = weight_bias_initialize(nn_total_layers,init='Xavier') # initialize the parameters and past updates matrices
-  print(type(parameters))
-  epoch_cost = []
-  validation_epoch_cost = []
-  optimizer='momentum'
-  epochs=40
-  count = 1
+        epoch_cost = []
+        validation_epoch_cost = []
+        epochs=40
+        count = 1
+        learning_rate=0.001
+        t=1      
 
+        while count<=epochs:
+            count = count + 1
+            if optimizer=='sgd':
+               for i in range(0,train_data.shape[1]):
+                 train_data_reshaped=train_data[:,i].reshape(num_features,1)
+                 train_label_reshaped=train_labels[:,i].reshape(num_classes,1)
+                 output,H,A=NN.forward_propagation(train_data_reshaped,parameters)
+                 gradients=NN.backpropagate(output,train_label_reshaped,H,A,parameters)
+                 optim=NN_optimizers(parameters,gradients,learning_rate,old_parameters,look_ahead_parameters,v,m,t,NN.num_layers)
+                 parameters=optim.sgd()
 
-  beta = 0.9
-  loss = 'cross_entropy' 
-  activation_function='relu'   
-  learning_rate=1e-4
-  lamb=0
-  while count<=epochs:
-      count = count + 1 
-      for i in range(0, X_train.shape[1], batch_size):
-          batch_count = batch_size
-          if i + batch_size > X_train.shape[1]: #
-              batch_count = X_train.shape[1] - i + 1
-          output,A,Z = forward_propagation(X_train[:,i:i+batch_size],parameters,activation_function)
-          gradients = backpropagate(output,y_train_encoded[:,i:i+batch_size],A,Z,parameters,activation_function,loss,batch_size)
-          optim=NN_optimizers(parameters,gradients,learning_rate,old_parameters,look_ahead_parameters,beta,X_train[:,i:i+batch_size],y_train_encoded[:,i:i+batch_size],activation_function,loss,batch_size)
-
-          if optimizer == 'nesterov':
-                prameters,old_prameters,look_ahead_parameters=optim.nesterov_gd()
-                
+            else:
+              for i in range(0, train_data.shape[1], NN.batch_size):
             
-          if optimizer == 'sgd':
-              parameters = optim.sgd()
-          elif optimizer == 'momentum':
-              parameters,old_parameters = optim.momentum_gd()
+                output,H,A = NN.forward_propagation(train_data[:,i:i+NN.batch_size],parameters)
+                gradients = NN.backpropagate(output,train_labels[:,i:i+NN.batch_size],H,A,parameters)
+                optim=NN_optimizers(parameters,gradients,learning_rate,old_parameters,look_ahead_parameters,v,m,t,NN.num_layers)
+
+                if optimizer == 'nesterov':
+                    parameters,old_parameters,look_ahead_parameters=optim.nesterov_gd(train_data[:,i:i+NN.batch_size],train_labels[:,i:i+NN.batch_size],NN.activation_function,NN.loss,NN.batch_size,NN.lambda_val)
+                if optimizer=='adam':
+                    parameters,v,m,t=optim.adam()
+                if optimizer == 'rmsprop':
+                    parameters,v =optim.rmsprop()
+                elif optimizer == 'momentum':
+                    parameters,old_parameters = optim.momentum_gd()
+                elif optimizer == 'nadam':
+                    parameters,v,m,t=optim.nadam(train_data[:,i:i+NN.batch_size],train_labels[:,i:i+NN.batch_size],NN.activation_function,NN.loss,NN.batch_size,NN.lambda_val)
+              
 
         # loss for the full training set
-      full_output, _, _ = forward_propagation(X_train, parameters, activation_function)
-      cost = loss_computation(y_train_encoded, full_output, loss,54000, lamb, parameters)
-      epoch_cost.append(cost)
+            full_output, _, _ = NN.forward_propagation(train_data, parameters)
+            cost = loss_computation(train_labels, full_output, NN.loss,no_sample_train, NN.lambda_val, parameters)
+            epoch_cost.append(cost)
         
         # loss for the validation set
-      out, _, _ = forward_propagation(X_val, parameters, activation_function)
-      val_cost = loss_computation(y_val_encoded, out,loss,6000, lamb, parameters)
-      validation_epoch_cost.append(val_cost)
-
+            out_val, _, _ = NN.forward_propagation(val_data, parameters)
+            val_cost = loss_computation(val_labels, out_val,NN.loss,no_sample_val, NN.lambda_val, parameters)
+            validation_epoch_cost.append(val_cost)
+              
         # Training accuracy at the end of the epoch
-      train_predictions = predict(X_train, parameters, activation_function)
-      train_acc = accuracy_score(y_train, train_predictions)
-
+            train_predictions = NN.predict(train_data, best_parameters)
+            train_acc = accuracy_score(y_train, train_predictions)
+           
         # Validation accuracy at the end of the epoch
-      #val_predictions = predict(X_val, parameters, activation_function)
-      #val_acc = accuracy_score(y_val, val_predictions)
-    
-  return full_output,parameters, epoch_cost,validation_epoch_cost,train_acc
-
-output,param,costs,val,acc=neural_fit()
-
-costs
-
-val
-
-acc
-
-loss_computation(y_train_encoded,output,'cross_entropy',54000,0,param)
+            val_predictions = NN.predict(val_data, best_parameters)
+            val_acc = accuracy_score(y_val, val_predictions)
+            
+        return epoch_cost,validation_epoch_cost,train_acc,val_acc
