@@ -686,7 +686,7 @@ def main(args):
             validation_epoch_cost = []
         
         count=1
-        while count<epochs:
+        while count<=epochs:
             remaining_no_train=train_data.shape[1] % NN.batch_size    ## Last remaining batch size will change, necessary to run for MSE loss
             
             for i in range(0, train_data.shape[1], NN.batch_size):
@@ -734,10 +734,10 @@ def main(args):
 
 
                 stop, best_loss, best_epoch, best_parameters = early_stopping(val_cost, best_loss, best_epoch,patience,parameters,count)
-                count = count + 1
-                
                 wandb.log({"training_acc": train_accuracy, "validation_accuracy": val_accuracy, "training_loss": train_cost, "validation loss": val_cost, 'epoch': count})
 
+                count = count + 1
+                
                 if stop:
                     best_val_predictions = NN.predict(test_data,best_parameters)
                     best_val_accuracy=NN.accuracy(test_labels,best_val_predictions)
