@@ -80,7 +80,7 @@ The code doesn't make use of NN frameworks like keras or tensorflow. The Neural 
 
 Function & Classes defined in ```train.py```
 
-- Generate confusion matrix plot, it has been commented out, if requried can be added
+- Generate confusion matrix plot, it has been commented out, if requried can be added. To generate plot you have to install matplotlib and seaborn as well
 
 - Activation functions & their derivatives: sigmoid, tanh, relu, identity & softmax
 
