@@ -69,9 +69,8 @@ Sone google collab files have been uploaded as well.
 
 ---------------------------------
 
-### Link to Project Report: https://wandb.ai/shashwat_mm19b053/Assignment-1/reports/CS6910-Assignment-1-Feed-Forward-Neural-Network-Implementation-by-scratch--VmlldzozNTg1NzUz
+#### Link to Project Report: https://wandb.ai/shashwat_mm19b053/Assignment-1/reports/CS6910-Assignment-1-Feed-Forward-Neural-Network-Implementation-by-scratch--VmlldzozNTg1NzUz
 
-``` ```
 
 ---------------------------------
 
