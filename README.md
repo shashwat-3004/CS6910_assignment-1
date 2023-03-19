@@ -81,6 +81,8 @@ The code doesn't make use of NN frameworks like keras or tensorflow. The Neural 
 
 Function & Classes defined in ```train.py```
 
+- Generate confusion matrix plot, it has been commented out, if requried can be added
+
 - Activation functions & their derivatives: sigmoid, tanh, relu, identity & softmax
 
 - ```loss_computation```: To compute cross-entropy loss & mse loss
@@ -128,6 +130,24 @@ Function & Classes defined in ```train.py```
         
         NN_fit_modified framework:
         
-        
+        ![NN_fit_modified](https://user-images.githubusercontent.com/62668967/226163932-a43af751-676f-4220-8a2b-bc48895d976b.png)
 
+ 
+# Results
+
+The best test accuracy obtained on Fashion-mnist dataset was 88% and 98.24% on mnist dataset with following configurations.
+
+ | | mnist | fashion-mnist |
+ |---------|-------|--------------|
+ | Number of neuron | 512 | 128 |
+ | Number of hidden layers | 3 | 3 |
+ | Activation Function | relu | tanh |
+ | Initialization | Xavier | Xavier |
+ | Learning Rate | 0.001 | 0.0001 |
+ | Optimizer | NAdam | Adam |
+ | Batch Size | 128 | 32 |
+ | Weight Decay | 0 | 0 |
+ | Epochs | 15 | 30 |
+ | Test Accuracy | 98.24%| 88% |
+     
             
