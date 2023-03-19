@@ -4,7 +4,7 @@ import wandb
 from keras.datasets import fashion_mnist, mnist
 import matplotlib.pyplot as plt
 import argparse
-import seaborn as sns
+# import seaborn as sns  (Use if you want to plot confusion matrix)
 #########################################################
  
 ### Code for Confusion Matrix
@@ -776,6 +776,8 @@ def main(args):
 
     test_pred=NN_fit_modified(X,y,X_test,y_test,True)            
 
+    # plot_confusion_matrix(y_test,test_pred)
+    
     ################################################
 
 
